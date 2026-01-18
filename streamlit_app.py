@@ -1,6 +1,6 @@
 """
 Podify - AI Podcast Generator
-Version: 3.0.0 - 播放列表功能
+Version: 3.1.0 - UI 美化
 """
 import streamlit as st
 from core import PodcastConfig, PodcastPipeline, SupabaseStorage
@@ -9,11 +9,99 @@ from core import PodcastConfig, PodcastPipeline, SupabaseStorage
 st.set_page_config(
     page_title="Podify",
     page_icon="🎙️",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# 简短标题
-st.markdown("### 🎙️ Podify")
+# 自定义 CSS 美化
+st.markdown("""
+<style>
+    /* 减少顶部空白 */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+    }
+    
+    /* 隐藏 Streamlit 默认的顶部装饰 */
+    header[data-testid="stHeader"] {
+        height: 0;
+    }
+    
+    /* 标题样式 */
+    .main-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1a1a2e;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* 输入框美化 */
+    .stTextArea textarea {
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
+    }
+    
+    .stTextArea textarea:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+    }
+    
+    /* 按钮美化 */
+    .stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    /* 成功/错误提示美化 */
+    .stSuccess, .stError, .stInfo {
+        border-radius: 10px;
+    }
+    
+    /* 音频播放器美化 */
+    .stAudio {
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    
+    /* Expander 美化 */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        border-radius: 8px;
+    }
+    
+    /* 分隔线美化 */
+    hr {
+        margin: 1rem 0;
+        border: none;
+        border-top: 1px solid #eee;
+    }
+    
+    /* 播放列表标题 */
+    .playlist-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #333;
+        margin: 0.5rem 0;
+    }
+    
+    /* 侧边栏美化 */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 标题
+st.markdown('<div class="main-title">🎙️ Podify</div>', unsafe_allow_html=True)
 
 # 初始化 session state
 if "logs" not in st.session_state:
@@ -151,7 +239,7 @@ if st.session_state.logs:
 # 播放列表（历史记录）
 # ==========================================
 st.markdown("---")
-st.markdown("#### 📚 播放列表")
+st.markdown('<div class="playlist-title">📚 播放列表</div>', unsafe_allow_html=True)
 
 # 获取历史记录
 try:

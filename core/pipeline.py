@@ -66,6 +66,18 @@ class PodcastPipeline:
         valid, error = self.config.validate()
         if not valid:
             return PipelineResult(success=False, error_message=error)
+        
+        # 打印配置信息
+        self.log(f"{'='*50}")
+        self.log(f"📋 配置信息:")
+        self.log(f"   - 模式: {self.config.podcast_mode}")
+        self.log(f"   - LLM 模型: {self.config.llm_model_name}")
+        self.log(f"   - TTS 模型: {self.config.tts_model_name}")
+        self.log(f"   - 音色 A: {self.config.voice_a_full}")
+        self.log(f"   - 音色 B: {self.config.voice_b_full}")
+        self.log(f"   - 音频生成: {'启用' if self.config.enable_audio_generation else '禁用'}")
+        self.log(f"   - 并发: Jina={self.config.max_workers_jina}, LLM={self.config.max_workers_llm}, TTS={self.config.max_workers_tts}")
+        self.log(f"{'='*50}")
             
         urls = self.config.urls
         stats = {
@@ -86,9 +98,14 @@ class PodcastPipeline:
         # ==========================================
         # Stage 1: Jina Fetching
         # ==========================================
-        self.log(f"{'='*40}")
-        self.log(f"🚀 STAGE 1: Jina Fetching (Workers={self.config.max_workers_jina})")
-        self.log(f"{'='*40}")
+        self.log(f"\n{'='*50}")
+        self.log(f"🚀 STAGE 1: Jina Fetching")
+        self.log(f"   Workers: {self.config.max_workers_jina}")
+        self.log(f"   URLs: {len(urls)}")
+        self.log(f"{'='*50}")
+        
+        for i, url in enumerate(urls):
+            self.log(f"   [{i+1}] {url}")
         
         self.update_progress("fetching", 0.0)
         
@@ -105,8 +122,11 @@ class PodcastPipeline:
                 if res[2]:  # 如果 text 存在
                     fetched_data.append(res)
                     stats["fetched"] += 1
+                    self.log(f"✅ [{res[0]+1}] 抓取成功: {len(res[2])} 字符")
                 else:
-                    self.log(f"⚠️ Task {res[0]+1} failed at fetch stage.")
+                    self.log(f"❌ [{res[0]+1}] 抓取失败: {res[1][:50]}...")
+        
+        self.log(f"\n📊 Stage 1 结果: {stats['fetched']}/{len(urls)} 成功")
                     
         if not fetched_data:
             return PipelineResult(
@@ -118,9 +138,11 @@ class PodcastPipeline:
         # ==========================================
         # Stage 2: LLM Processing
         # ==========================================
-        self.log(f"\n{'='*40}")
-        self.log(f"🚀 STAGE 2: LLM Processing (Workers={self.config.max_workers_llm})")
-        self.log(f"{'='*40}")
+        self.log(f"\n{'='*50}")
+        self.log(f"🚀 STAGE 2: LLM Processing")
+        self.log(f"   Workers: {self.config.max_workers_llm}")
+        self.log(f"   待处理: {len(fetched_data)} 篇文章")
+        self.log(f"{'='*50}")
         
         self.update_progress("processing", 0.0)
         
@@ -146,10 +168,12 @@ class PodcastPipeline:
                     processed_scripts[idx] = (r_text, s_json)
                     full_text_log += r_text
                     stats["processed"] += 1
+                    self.log(f"✅ [{idx+1}] LLM 处理成功: {len(s_json)} 行对话")
                 else:
-                    self.log(f"⚠️ Task {idx+1} failed at LLM stage.")
-                    
-        self.log(f"\n📄 Text generation complete.")
+                    self.log(f"❌ [{idx+1}] LLM 处理失败")
+        
+        self.log(f"\n📊 Stage 2 结果: {stats['processed']}/{len(fetched_data)} 成功")
+        self.log(f"\n📄 文本脚本生成完成")
         
         # ==========================================
         # Stage 3: Audio Generation (Optional)
@@ -157,9 +181,11 @@ class PodcastPipeline:
         audio_bytes = None
         
         if self.config.enable_audio_generation:
-            self.log(f"\n{'='*40}")
-            self.log(f"🚀 STAGE 3: Audio Generation (Workers={self.config.max_workers_tts})")
-            self.log(f"{'='*40}")
+            self.log(f"\n{'='*50}")
+            self.log(f"🚀 STAGE 3: Audio Generation")
+            self.log(f"   Workers: {self.config.max_workers_tts}")
+            self.log(f"   待合成: {sum(1 for s in processed_scripts if s)} 篇文章")
+            self.log(f"{'='*50}")
             
             self.update_progress("audio", 0.0)
             
@@ -168,10 +194,12 @@ class PodcastPipeline:
             )
             processed_lines = 0
             
+            self.log(f"   总对话行数: {total_lines}")
+            
             for i, script_data in enumerate(processed_scripts):
                 if script_data:
                     r_text, s_json = script_data
-                    self.log(f"\n🎙️ Synthesizing Article {i+1} ({len(s_json)} lines)...")
+                    self.log(f"\n🎙️ Article {i+1}: 合成 {len(s_json)} 行对话...")
                     
                     def audio_progress(current, total):
                         nonlocal processed_lines
@@ -192,20 +220,30 @@ class PodcastPipeline:
                         final_mix += article_audio
                         final_mix += transition
                         stats["audio_generated"] += 1
-                        self.log(f"   ✅ Article {i+1} audio done.")
+                        self.log(f"   ✅ Article {i+1} 音频完成，时长: {len(article_audio)/1000:.1f}s")
                     else:
-                        self.log(f"   ⚠️ Article {i+1} audio empty.")
+                        self.log(f"   ❌ Article {i+1} 音频为空")
                         
             # 导出音频
             if len(final_mix) > 0:
                 buffer = io.BytesIO()
                 final_mix.export(buffer, format="mp3")
                 audio_bytes = buffer.getvalue()
-                self.log(f"\n🎉 Audio generation complete!")
+                self.log(f"\n🎉 音频生成完成!")
+                self.log(f"   总时长: {len(final_mix)/1000:.1f} 秒")
+                self.log(f"   文件大小: {len(audio_bytes)/1024:.1f} KB")
             else:
-                self.log("\n⚠️ No audio produced.")
+                self.log("\n⚠️ 未生成任何音频")
         else:
-            self.log("\n⚪ Audio generation skipped.")
+            self.log("\n⚪ 音频生成已跳过（未启用）")
+        
+        self.log(f"\n{'='*50}")
+        self.log(f"📊 最终统计:")
+        self.log(f"   - 链接总数: {stats['total_urls']}")
+        self.log(f"   - 抓取成功: {stats['fetched']}")
+        self.log(f"   - LLM 处理成功: {stats['processed']}")
+        self.log(f"   - 音频生成成功: {stats['audio_generated']}")
+        self.log(f"{'='*50}")
             
         self.update_progress("complete", 1.0)
         

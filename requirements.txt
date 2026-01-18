@@ -2,3 +2,4 @@ streamlit
 pytz
 requests
 pydub
+supabase

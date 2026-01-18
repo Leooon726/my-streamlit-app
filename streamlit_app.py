@@ -1,18 +1,18 @@
 """
 AI Podcast Generator - Streamlit 前端界面
-Version: 2.1.0 - 移动端优化
+Version: 2.2.0 - Supabase Storage 集成
 """
 import streamlit as st
-from core import PodcastConfig, PodcastPipeline
+from core import PodcastConfig, PodcastPipeline, SupabaseStorage
 
 # 页面配置
 st.set_page_config(
     page_title="AI Podcast Generator",
     page_icon="🎙️",
-    layout="centered"  # 改为 centered，更适合移动端
+    layout="centered"
 )
 
-# 标题（更紧凑）
+# 标题
 st.title("🎙️ AI Podcast Generator")
 
 # 初始化 session state
@@ -22,9 +22,11 @@ if "result" not in st.session_state:
     st.session_state.result = None
 if "is_running" not in st.session_state:
     st.session_state.is_running = False
+if "cloud_urls" not in st.session_state:
+    st.session_state.cloud_urls = None
 
 # ==========================================
-# 侧边栏 - 配置项（保持不变）
+# 侧边栏 - 配置项
 # ==========================================
 with st.sidebar:
     st.header("⚙️ 配置")
@@ -40,6 +42,9 @@ with st.sidebar:
     )
     
     enable_audio = st.checkbox("生成音频", value=True)
+    
+    # 云存储设置
+    enable_cloud_storage = st.checkbox("上传到云存储", value=True)
     
     with st.expander("高级设置"):
         llm_model = st.text_input("LLM", value="deepseek-ai/DeepSeek-V3.2")
@@ -58,6 +63,22 @@ with st.sidebar:
             workers_llm = st.number_input("LLM", min_value=1, max_value=10, value=5)
         with col3:
             workers_tts = st.number_input("TTS", min_value=1, max_value=10, value=5)
+    
+    # Supabase 设置（折叠）
+    with st.expander("云存储设置"):
+        supabase_url = st.text_input(
+            "Supabase URL",
+            value="https://osxroigfhvnhwijelbrj.supabase.co"
+        )
+        supabase_key = st.text_input(
+            "Supabase Key",
+            value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeHJvaWdmaHZuaHdpamVsYnJqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODcxMjMwOSwiZXhwIjoyMDg0Mjg4MzA5fQ.STIO32GaWK0ehPn-izsiWk2CpjjqdLue7ycdWUDNNsc",
+            type="password"
+        )
+        supabase_bucket = st.text_input(
+            "Bucket",
+            value="podcast-material"
+        )
 
 # ==========================================
 # 主界面 - 输入和执行
@@ -78,7 +99,7 @@ run_button = st.button(
 )
 
 # ==========================================
-# 显示结果（放在最上面）
+# 显示结果
 # ==========================================
 if st.session_state.result:
     result = st.session_state.result
@@ -86,7 +107,15 @@ if st.session_state.result:
     if result.success:
         st.success("✅ 生成完成")
         
-        # 音频放最上面
+        # 云存储链接（如果有）
+        if st.session_state.cloud_urls:
+            urls = st.session_state.cloud_urls
+            if urls.get("audio", {}).get("url"):
+                st.markdown(f"🔗 **音频链接**: [点击播放]({urls['audio']['url']})")
+            if urls.get("script", {}).get("url"):
+                st.markdown(f"🔗 **脚本链接**: [点击查看]({urls['script']['url']})")
+        
+        # 音频播放器
         if result.audio_data:
             st.audio(result.audio_data, format="audio/mp3")
             st.download_button(
@@ -121,7 +150,7 @@ if st.session_state.result:
     else:
         st.error(f"❌ {result.error_message}")
 
-# 日志（折叠，放最下面）
+# 日志（折叠）
 if st.session_state.logs:
     with st.expander("📋 运行日志"):
         full_log_text = "\n".join(st.session_state.logs)
@@ -145,6 +174,7 @@ if run_button:
     st.session_state.is_running = True
     st.session_state.logs = []
     st.session_state.result = None
+    st.session_state.cloud_urls = None
     
     # 创建配置
     config = PodcastConfig(
@@ -179,6 +209,7 @@ if run_button:
         "writing": "撰写中",
         "tts": "合成中",
         "merging": "合并中",
+        "uploading": "上传中",
         "complete": "完成"
     }
     
@@ -194,10 +225,48 @@ if run_button:
     with st.spinner("生成中..."):
         result = pipeline.run()
     
+    # 上传到云存储
+    cloud_urls = None
+    if result.success and enable_cloud_storage and supabase_url and supabase_key:
+        progress_bar.progress(0.95, text="上传到云存储...")
+        log_callback("")
+        log_callback("=" * 50)
+        log_callback("☁️ 上传到 Supabase Storage")
+        log_callback("=" * 50)
+        
+        try:
+            storage = SupabaseStorage(
+                url=supabase_url,
+                key=supabase_key,
+                bucket=supabase_bucket
+            )
+            
+            cloud_urls = storage.upload_results(
+                audio_bytes=result.audio_data,
+                script_text=result.script_text
+            )
+            
+            # 记录上传结果
+            if cloud_urls.get("audio", {}).get("success"):
+                log_callback(f"✅ 音频上传成功")
+                log_callback(f"   URL: {cloud_urls['audio']['url']}")
+            else:
+                log_callback(f"❌ 音频上传失败: {cloud_urls.get('audio', {}).get('message', '未知错误')}")
+            
+            if cloud_urls.get("script", {}).get("success"):
+                log_callback(f"✅ 脚本上传成功")
+                log_callback(f"   URL: {cloud_urls['script']['url']}")
+            else:
+                log_callback(f"❌ 脚本上传失败: {cloud_urls.get('script', {}).get('message', '未知错误')}")
+                
+        except Exception as e:
+            log_callback(f"❌ 云存储错误: {type(e).__name__}: {e}")
+    
     # 保存结果
     with logs_lock:
         st.session_state.logs = list(logs)
     st.session_state.result = result
+    st.session_state.cloud_urls = cloud_urls
     st.session_state.is_running = False
     
     # 清除进度条并刷新

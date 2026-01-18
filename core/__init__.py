@@ -5,6 +5,7 @@ from .parser import smart_parse_script
 from .llm import analyze_article, generate_unified_script
 from .audio import generate_audio_parallel, merge_audio_segments
 from .pipeline import PodcastPipeline, PipelineResult
+from .storage import SupabaseStorage
 
 __all__ = [
     'PodcastConfig',
@@ -16,5 +17,6 @@ __all__ = [
     'generate_audio_parallel',
     'merge_audio_segments',
     'PodcastPipeline',
-    'PipelineResult'
+    'PipelineResult',
+    'SupabaseStorage'
 ]

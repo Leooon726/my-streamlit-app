@@ -34,7 +34,6 @@ with st.sidebar:
     st.subheader("🔑 API 凭证")
     api_key = st.text_input(
         "SiliconFlow API Key",
-        type="password",
         help="请输入您的 SiliconFlow API Key"
     )
     
@@ -60,7 +59,7 @@ with st.sidebar:
     st.subheader("🤖 模型配置")
     llm_model = st.text_input(
         "LLM 模型",
-        value="deepseek-ai/DeepSeek-V3",
+        value="deepseek-ai/DeepSeek-V3.2",
         help="用于分析和生成脚本的大语言模型"
     )
     

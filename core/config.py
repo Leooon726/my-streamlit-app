@@ -128,7 +128,7 @@ class PodcastConfig:
     max_workers_tts: int = 5
     
     # 模型配置
-    llm_model_name: str = "deepseek-ai/DeepSeek-V3"
+    llm_model_name: str = "deepseek-ai/DeepSeek-V3.2"
     tts_model_name: str = "FunAudioLLM/CosyVoice2-0.5B"
     
     # 音色配置

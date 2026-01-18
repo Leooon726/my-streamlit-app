@@ -1,6 +1,6 @@
 """
 AI Podcast Generator - Streamlit 前端界面
-Version: 2.0.0 - 并行架构重构
+Version: 2.1.0 - 移动端优化
 """
 import streamlit as st
 from core import PodcastConfig, PodcastPipeline
@@ -9,13 +9,11 @@ from core import PodcastConfig, PodcastPipeline
 st.set_page_config(
     page_title="AI Podcast Generator",
     page_icon="🎙️",
-    layout="wide"
+    layout="centered"  # 改为 centered，更适合移动端
 )
 
-# 标题
+# 标题（更紧凑）
 st.title("🎙️ AI Podcast Generator")
-st.markdown("将文章链接转换为双人播客脚本和音频")
-st.markdown("---")
 
 # 初始化 session state
 if "logs" not in st.session_state:
@@ -26,142 +24,122 @@ if "is_running" not in st.session_state:
     st.session_state.is_running = False
 
 # ==========================================
-# 侧边栏 - 配置项
+# 侧边栏 - 配置项（保持不变）
 # ==========================================
 with st.sidebar:
-    st.header("⚙️ 系统配置")
+    st.header("⚙️ 配置")
     
-    # API 凭证
-    st.subheader("🔑 API 凭证")
     api_key = st.text_input(
-        "SiliconFlow API Key",
+        "API Key",
         value="sk-vlmhbxgjgllzolnsqunigerenwtwdfsutvaecdpgpvxqyncc",
-        help="请输入您的 SiliconFlow API Key"
     )
     
-    st.markdown("---")
-    
-    # 模式选择
-    st.subheader("🎯 模式选择")
     podcast_mode = st.selectbox(
-        "播客模式",
+        "模式",
         options=["Deep Dive (解读模式)", "News Brief (播报模式)"],
-        help="解读模式：师生对谈风格\n播报模式：新闻播报风格"
     )
     
-    enable_audio = st.checkbox(
-        "启用音频生成",
-        value=True,
-        help="是否生成 TTS 音频文件"
-    )
+    enable_audio = st.checkbox("生成音频", value=True)
     
-    st.markdown("---")
-    
-    # 模型配置
-    st.subheader("🤖 模型配置")
-    llm_model = st.text_input(
-        "LLM 模型",
-        value="deepseek-ai/DeepSeek-V3.2",
-        help="用于分析和生成脚本的大语言模型"
-    )
-    
-    tts_model = st.text_input(
-        "TTS 模型",
-        value="FunAudioLLM/CosyVoice2-0.5B",
-        help="用于语音合成的模型"
-    )
-    
-    st.markdown("---")
-    
-    # 音色配置
-    st.subheader("🎤 音色配置")
-    col1, col2 = st.columns(2)
-    with col1:
-        voice_a = st.text_input(
-            "Host A 音色",
-            value="alex",
-            help="主持人 A 的音色 ID"
-        )
-    with col2:
-        voice_b = st.text_input(
-            "Host B 音色",
-            value="claire",
-            help="主持人 B 的音色 ID"
-        )
-    
-    st.markdown("---")
-    
-    # 并发设置
-    st.subheader("🚦 并发设置")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        workers_jina = st.number_input(
-            "Jina",
-            min_value=1,
-            max_value=10,
-            value=2,
-            help="Jina 抓取并发数"
-        )
-    with col2:
-        workers_llm = st.number_input(
-            "LLM",
-            min_value=1,
-            max_value=10,
-            value=5,
-            help="LLM 处理并发数"
-        )
-    with col3:
-        workers_tts = st.number_input(
-            "TTS",
-            min_value=1,
-            max_value=10,
-            value=5,
-            help="TTS 生成并发数"
-        )
+    with st.expander("高级设置"):
+        llm_model = st.text_input("LLM", value="deepseek-ai/DeepSeek-V3.2")
+        tts_model = st.text_input("TTS", value="FunAudioLLM/CosyVoice2-0.5B")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            voice_a = st.text_input("Host A", value="alex")
+        with col2:
+            voice_b = st.text_input("Host B", value="claire")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            workers_jina = st.number_input("Jina", min_value=1, max_value=10, value=2)
+        with col2:
+            workers_llm = st.number_input("LLM", min_value=1, max_value=10, value=5)
+        with col3:
+            workers_tts = st.number_input("TTS", min_value=1, max_value=10, value=5)
 
 # ==========================================
-# 主界面 - 链接输入和执行
+# 主界面 - 输入和执行
 # ==========================================
-st.header("📝 输入文章链接")
-
 url_input = st.text_area(
-    "请粘贴文章链接（每行一个）",
-    height=200,
-    placeholder="""https://example.com/article1
-https://example.com/article2
-https://example.com/article3""",
-    help="支持任意网页链接，系统会自动使用 Jina 抓取内容"
+    "输入文章链接（每行一个）",
+    height=120,
+    placeholder="https://example.com/article1\nhttps://example.com/article2",
 )
 
-# 解析 URL 列表
 url_list = [line.strip() for line in url_input.split('\n') if line.strip()]
 
-# 显示链接统计
-if url_list:
-    st.info(f"📊 已输入 {len(url_list)} 个链接")
-
-st.markdown("---")
-
 # 执行按钮
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    run_button = st.button(
-        "🚀 开始生成",
-        use_container_width=True,
-        disabled=st.session_state.is_running
-    )
+run_button = st.button(
+    f"🚀 生成播客 ({len(url_list)} 篇)",
+    use_container_width=True,
+    disabled=st.session_state.is_running or len(url_list) == 0
+)
+
+# ==========================================
+# 显示结果（放在最上面）
+# ==========================================
+if st.session_state.result:
+    result = st.session_state.result
+    
+    if result.success:
+        st.success("✅ 生成完成")
+        
+        # 音频放最上面
+        if result.audio_data:
+            st.audio(result.audio_data, format="audio/mp3")
+            st.download_button(
+                "📥 下载音频",
+                data=result.audio_data,
+                file_name="podcast.mp3",
+                mime="audio/mp3",
+                use_container_width=True
+            )
+        
+        # 脚本（默认折叠）
+        if result.script_text:
+            with st.expander("📜 查看脚本"):
+                st.text(result.script_text)
+            st.download_button(
+                "📥 下载脚本",
+                data=result.script_text,
+                file_name="script.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        
+        # 统计信息（折叠）
+        stats = result.stats or {}
+        with st.expander("📊 统计"):
+            cols = st.columns(5)
+            cols[0].metric("链接", stats.get("total_urls", 0))
+            cols[1].metric("抓取", stats.get("fetched", 0))
+            cols[2].metric("分析", stats.get("analyzed", 0))
+            cols[3].metric("脚本", stats.get("script_lines", 0))
+            cols[4].metric("音频", stats.get("audio_segments", 0))
+    else:
+        st.error(f"❌ {result.error_message}")
+
+# 日志（折叠，放最下面）
+if st.session_state.logs:
+    with st.expander("📋 运行日志"):
+        full_log_text = "\n".join(st.session_state.logs)
+        st.code(full_log_text, language=None)
+        st.download_button(
+            "📥 下载日志",
+            data=full_log_text,
+            file_name="log.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
 
 # ==========================================
 # 执行流程
 # ==========================================
 if run_button:
-    # 验证输入
     if not api_key:
-        st.error("❌ 请输入 API Key")
-        st.stop()
-    
-    if not url_list:
-        st.error("❌ 请输入至少一个链接")
+        st.error("请输入 API Key")
         st.stop()
     
     st.session_state.is_running = True
@@ -183,15 +161,10 @@ if run_button:
         urls=url_list
     )
     
-    # 创建进度显示
+    # 进度显示
     progress_bar = st.progress(0, text="准备中...")
-    status_text = st.empty()
     
-    # 创建单个日志展示区域
-    log_expander = st.expander("📋 运行日志", expanded=True)
-    log_placeholder = log_expander.empty()
-    
-    # 日志回调（线程安全，不直接更新 UI）
+    # 日志收集（线程安全）
     import threading
     logs = []
     logs_lock = threading.Lock()
@@ -200,132 +173,33 @@ if run_button:
         with logs_lock:
             logs.append(message)
     
-    # 进度回调
     stage_names = {
-        "fetching": "🌍 Stage 1: 抓取内容",
-        "analyzing": "🔍 Stage 2: LLM 分析",
-        "writing": "✍️ Stage 3: 撰写脚本",
-        "tts": "🎤 Stage 4: TTS 生成",
-        "merging": "🔧 Stage 5: 音频合并",
-        "complete": "✅ 完成"
+        "fetching": "抓取中",
+        "analyzing": "分析中",
+        "writing": "撰写中",
+        "tts": "合成中",
+        "merging": "合并中",
+        "complete": "完成"
     }
     
     def progress_callback(stage, progress):
         stage_name = stage_names.get(stage, stage)
-        progress_bar.progress(progress, text=f"{stage_name} ({progress*100:.0f}%)")
+        progress_bar.progress(progress, text=f"{stage_name} {progress*100:.0f}%")
     
-    # 创建并运行流水线
+    # 运行流水线
     pipeline = PodcastPipeline(config)
     pipeline.set_log_callback(log_callback)
     pipeline.set_progress_callback(progress_callback)
     
-    with st.spinner("正在生成播客..."):
+    with st.spinner("生成中..."):
         result = pipeline.run()
     
-    # 显示最终日志
+    # 保存结果
     with logs_lock:
-        final_logs = list(logs)
-    log_placeholder.code("\n".join(final_logs), language=None)
-    
+        st.session_state.logs = list(logs)
     st.session_state.result = result
-    st.session_state.logs = final_logs
     st.session_state.is_running = False
     
-    # 清除进度条
+    # 清除进度条并刷新
     progress_bar.empty()
-    status_text.empty()
-
-# ==========================================
-# 显示结果
-# ==========================================
-if st.session_state.result:
-    result = st.session_state.result
-    
-    st.markdown("---")
-    st.header("📊 生成结果")
-    
-    if result.success:
-        # 统计信息
-        stats = result.stats or {}
-        col1, col2, col3, col4, col5 = st.columns(5)
-        with col1:
-            st.metric("链接数", stats.get("total_urls", 0))
-        with col2:
-            st.metric("抓取", stats.get("fetched", 0))
-        with col3:
-            st.metric("分析", stats.get("analyzed", 0))
-        with col4:
-            st.metric("脚本行", stats.get("script_lines", 0))
-        with col5:
-            st.metric("音频段", stats.get("audio_segments", 0))
-        
-        st.success("✅ 生成完成！")
-        
-        # 脚本文本
-        if result.script_text:
-            st.subheader("📜 播客脚本")
-            with st.expander("查看完整脚本", expanded=True):
-                st.text(result.script_text)
-            
-            # 下载脚本按钮
-            st.download_button(
-                label="📥 下载脚本 (TXT)",
-                data=result.script_text,
-                file_name="podcast_script.txt",
-                mime="text/plain"
-            )
-        
-        # 音频
-        if result.audio_data:
-            st.subheader("🎧 播客音频")
-            st.audio(result.audio_data, format="audio/mp3")
-            
-            # 下载音频按钮
-            st.download_button(
-                label="📥 下载音频 (MP3)",
-                data=result.audio_data,
-                file_name="podcast_final.mp3",
-                mime="audio/mp3"
-            )
-    else:
-        st.error(f"❌ 生成失败: {result.error_message}")
-
-# ==========================================
-# 显示日志
-# ==========================================
-if st.session_state.logs:
-    st.subheader("📋 完整运行日志")
-    
-    # 合并所有日志
-    full_log_text = "\n".join(st.session_state.logs)
-    
-    # 下载日志按钮
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        st.download_button(
-            label="📥 下载日志",
-            data=full_log_text,
-            file_name="podcast_generation_log.txt",
-            mime="text/plain",
-            key="download_log"
-        )
-    
-    # 使用 code 组件显示日志（自带复制按钮）
-    with st.expander("查看完整日志（点击右上角复制）", expanded=False):
-        st.code(full_log_text, language=None)
-
-# ==========================================
-# 页脚
-# ==========================================
-st.markdown("---")
-st.markdown(
-    """
-    <div style="text-align: center; color: #888;">
-        <small>
-            Powered by SiliconFlow API | 
-            Built with Streamlit
-        </small>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+    st.rerun()

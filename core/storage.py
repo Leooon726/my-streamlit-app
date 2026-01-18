@@ -178,6 +178,8 @@ class SupabaseStorage:
             import requests
             response = requests.get(script_url, timeout=10)
             if response.status_code == 200:
+                # 强制使用 UTF-8 解码
+                response.encoding = 'utf-8'
                 return response.text
             return None
         except Exception as e:

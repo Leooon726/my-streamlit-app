@@ -184,15 +184,17 @@ if run_button:
     # 创建进度显示
     progress_bar = st.progress(0, text="准备中...")
     status_text = st.empty()
-    log_container = st.container()
+    
+    # 创建单个日志展示区域
+    log_expander = st.expander("📋 运行日志", expanded=True)
+    log_placeholder = log_expander.empty()
     
     # 日志回调
     logs = []
     def log_callback(message):
         logs.append(message)
-        with log_container:
-            with st.expander("📋 运行日志", expanded=False):
-                st.text("\n".join(logs[-50:]))  # 只显示最后50条
+        # 实时更新同一个 placeholder
+        log_placeholder.code("\n".join(logs[-100:]), language=None)
     
     # 进度回调
     stage_names = {

@@ -149,12 +149,20 @@ def generate_audio_for_script(
     """
     为整个脚本生成音频
     """
+    # 验证 log_func 是否可用
+    log_func(f"   ========== generate_audio_for_script 开始 ==========")
     log_func(f"   📋 脚本共 {len(script_json)} 行")
     log_func(f"   🔧 TTS 配置:")
     log_func(f"      Model: {config.tts_model_name}")
     log_func(f"      Voice A: {config.voice_a_full}")
     log_func(f"      Voice B: {config.voice_b_full}")
     log_func(f"      Workers: {config.max_workers_tts}")
+    
+    # 验证 API Key
+    if not config.api_key:
+        log_func(f"   ❌ API Key 为空!")
+        return AudioSegment.empty()
+    log_func(f"      API Key: {config.api_key[:10]}...{config.api_key[-4:]}")
     
     # 显示脚本内容预览
     log_func(f"   📜 脚本预览:")
@@ -164,48 +172,44 @@ def generate_audio_for_script(
     if len(script_json) > 3:
         log_func(f"      ... 还有 {len(script_json) - 3} 行")
     
-    log_func(f"   🚀 开始并发 TTS 合成...")
+    log_func(f"   🚀 开始顺序 TTS 合成（便于调试）...")
     
     results = []
     errors = []
     
-    # 使用线程池并发处理
-    with ThreadPoolExecutor(max_workers=config.max_workers_tts) as executor:
-        future_to_index = {}
+    # 顺序处理（便于调试）
+    valid_segments = []
+    for i, line in enumerate(script_json):
+        txt = line.get('text', '')
+        if txt and txt.strip():
+            valid_segments.append((i, txt, line.get('speaker', '')))
+        else:
+            log_func(f"      ⚠️ [Segment {i}] 跳过空文本")
+    
+    log_func(f"   📤 共 {len(valid_segments)} 个有效 TTS 任务")
+    
+    total = len(valid_segments)
+    for completed, (i, txt, speaker) in enumerate(valid_segments, 1):
+        log_func(f"")
+        log_func(f"   --- Segment {i}/{total} ---")
         
-        for i, line in enumerate(script_json):
-            txt = line.get('text', '')
-            if txt and txt.strip():
-                future = executor.submit(
-                    generate_audio_segment,
-                    config,
-                    i,
-                    txt,
-                    line.get('speaker', ''),
-                    log_func
-                )
-                future_to_index[future] = i
-            else:
-                log_func(f"      ⚠️ [Segment {i}] 跳过空文本")
-        
-        log_func(f"   📤 已提交 {len(future_to_index)} 个 TTS 任务")
-        
-        completed = 0
-        total = len(future_to_index)
-        
-        for future in as_completed(future_to_index):
-            idx, audio_data, error = future.result()
-            completed += 1
+        try:
+            idx, audio_data, error = generate_audio_segment(
+                config, i, txt, speaker, log_func
+            )
             
             if progress_callback:
                 progress_callback(completed, total)
                 
             if audio_data:
                 results.append((idx, audio_data))
-                log_func(f"   📊 进度: {completed}/{total} - Segment {idx} ✅")
+                log_func(f"   ✅ Segment {i} 完成")
             else:
                 errors.append((idx, error))
-                log_func(f"   📊 进度: {completed}/{total} - Segment {idx} ❌ {error}")
+                log_func(f"   ❌ Segment {i} 失败: {error}")
+        except Exception as e:
+            log_func(f"   ❌ Segment {i} 异常: {type(e).__name__}: {e}")
+            errors.append((i, str(e)))
     
     # 汇总统计
     log_func(f"")

@@ -213,19 +213,30 @@ class PodcastPipeline:
             
             for article_idx, (i, script_data) in enumerate(scripts_to_process):
                 r_text, s_json = script_data
-                self.log(f"🎙️ Article {i+1}: 合成 {len(s_json)} 行对话")
+                self.log(f"🎙️ Article {i+1}: 开始合成 {len(s_json)} 行对话")
+                self.log(f"   调用 generate_audio_for_script...")
                 
                 def audio_progress(current, total):
                     nonlocal processed_lines
                     overall = (processed_lines + current) / total_lines if total_lines > 0 else 0
                     self.update_progress("audio", overall)
                 
-                article_audio = generate_audio_for_script(
-                    self.config,
-                    s_json,
-                    progress_callback=audio_progress,
-                    log_func=self.log
-                )
+                try:
+                    article_audio = generate_audio_for_script(
+                        self.config,
+                        s_json,
+                        progress_callback=audio_progress,
+                        log_func=self.log
+                    )
+                    
+                    self.log(f"   generate_audio_for_script 返回，音频长度: {len(article_audio)}ms")
+                    
+                except Exception as e:
+                    self.log(f"   ❌ generate_audio_for_script 异常:")
+                    self.log(f"      {type(e).__name__}: {e}")
+                    import traceback
+                    self.log(f"      Traceback: {traceback.format_exc()}")
+                    article_audio = AudioSegment.empty()
                 
                 processed_lines += len(s_json)
                 

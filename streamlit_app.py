@@ -1,19 +1,19 @@
 """
-AI Podcast Generator - Streamlit 前端界面
-Version: 2.2.0 - Supabase Storage 集成
+Podify - AI Podcast Generator
+Version: 3.0.0 - 播放列表功能
 """
 import streamlit as st
 from core import PodcastConfig, PodcastPipeline, SupabaseStorage
 
 # 页面配置
 st.set_page_config(
-    page_title="AI Podcast Generator",
+    page_title="Podify",
     page_icon="🎙️",
     layout="centered"
 )
 
-# 标题
-st.title("🎙️ AI Podcast Generator")
+# 简短标题
+st.markdown("### 🎙️ Podify")
 
 # 初始化 session state
 if "logs" not in st.session_state:
@@ -24,9 +24,11 @@ if "is_running" not in st.session_state:
     st.session_state.is_running = False
 if "cloud_urls" not in st.session_state:
     st.session_state.cloud_urls = None
+if "selected_podcast" not in st.session_state:
+    st.session_state.selected_podcast = None
 
 # ==========================================
-# 侧边栏 - 配置项
+# 侧边栏 - 配置
 # ==========================================
 with st.sidebar:
     st.header("⚙️ 配置")
@@ -38,13 +40,11 @@ with st.sidebar:
     
     podcast_mode = st.selectbox(
         "模式",
-        options=["Deep Dive (解读模式)", "News Brief (播报模式)"],
+        options=["Deep Dive (解读)", "News Brief (播报)"],
     )
     
     enable_audio = st.checkbox("生成音频", value=True)
-    
-    # 云存储设置
-    enable_cloud_storage = st.checkbox("上传到云存储", value=True)
+    enable_cloud = st.checkbox("保存到云端", value=True)
     
     with st.expander("高级设置"):
         llm_model = st.text_input("LLM", value="deepseek-ai/DeepSeek-V3.2")
@@ -64,42 +64,42 @@ with st.sidebar:
         with col3:
             workers_tts = st.number_input("TTS", min_value=1, max_value=10, value=5)
     
-    # Supabase 设置（折叠）
-    with st.expander("云存储设置"):
+    with st.expander("云存储"):
         supabase_url = st.text_input(
-            "Supabase URL",
+            "URL",
             value="https://osxroigfhvnhwijelbrj.supabase.co"
         )
         supabase_key = st.text_input(
-            "Supabase Key",
+            "Key",
             value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeHJvaWdmaHZuaHdpamVsYnJqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODcxMjMwOSwiZXhwIjoyMDg0Mjg4MzA5fQ.STIO32GaWK0ehPn-izsiWk2CpjjqdLue7ycdWUDNNsc",
             type="password"
         )
-        supabase_bucket = st.text_input(
-            "Bucket",
-            value="podcast-material"
-        )
+        supabase_bucket = st.text_input("Bucket", value="podcast-material")
 
 # ==========================================
-# 主界面 - 输入和执行
+# 主界面 - 生成区域
 # ==========================================
 url_input = st.text_area(
     "输入文章链接（每行一个）",
-    height=120,
+    height=100,
     placeholder="https://example.com/article1\nhttps://example.com/article2",
 )
 
 url_list = [line.strip() for line in url_input.split('\n') if line.strip()]
 
-# 执行按钮
-run_button = st.button(
-    f"🚀 生成播客 ({len(url_list)} 篇)",
-    use_container_width=True,
-    disabled=st.session_state.is_running or len(url_list) == 0
-)
+col1, col2 = st.columns([3, 1])
+with col1:
+    podcast_title = st.text_input("标题", value="", placeholder="可选，留空自动生成")
+with col2:
+    st.write("")  # 占位
+    run_button = st.button(
+        f"🚀 生成 ({len(url_list)})",
+        use_container_width=True,
+        disabled=st.session_state.is_running or len(url_list) == 0
+    )
 
 # ==========================================
-# 显示结果
+# 显示生成结果
 # ==========================================
 if st.session_state.result:
     result = st.session_state.result
@@ -107,15 +107,12 @@ if st.session_state.result:
     if result.success:
         st.success("✅ 生成完成")
         
-        # 云存储链接（如果有）
-        if st.session_state.cloud_urls:
+        # 云端链接
+        if st.session_state.cloud_urls and st.session_state.cloud_urls.get("success"):
             urls = st.session_state.cloud_urls
-            if urls.get("audio", {}).get("url"):
-                st.markdown(f"🔗 **音频链接**: [点击播放]({urls['audio']['url']})")
-            if urls.get("script", {}).get("url"):
-                st.markdown(f"🔗 **脚本链接**: [点击查看]({urls['script']['url']})")
+            st.info(f"☁️ 已保存到云端")
         
-        # 音频播放器
+        # 音频播放
         if result.audio_data:
             st.audio(result.audio_data, format="audio/mp3")
             st.download_button(
@@ -126,9 +123,9 @@ if st.session_state.result:
                 use_container_width=True
             )
         
-        # 脚本（默认折叠）
+        # 脚本
         if result.script_text:
-            with st.expander("📜 查看脚本"):
+            with st.expander("📜 脚本"):
                 st.text(result.script_text)
             st.download_button(
                 "📥 下载脚本",
@@ -138,7 +135,7 @@ if st.session_state.result:
                 use_container_width=True
             )
         
-        # 统计信息（折叠）
+        # 统计
         stats = result.stats or {}
         with st.expander("📊 统计"):
             cols = st.columns(5)
@@ -150,21 +147,61 @@ if st.session_state.result:
     else:
         st.error(f"❌ {result.error_message}")
 
-# 日志（折叠）
+# 日志
 if st.session_state.logs:
-    with st.expander("📋 运行日志"):
-        full_log_text = "\n".join(st.session_state.logs)
-        st.code(full_log_text, language=None)
-        st.download_button(
-            "📥 下载日志",
-            data=full_log_text,
-            file_name="log.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
+    with st.expander("📋 日志"):
+        st.code("\n".join(st.session_state.logs), language=None)
 
 # ==========================================
-# 执行流程
+# 播放列表（历史记录）
+# ==========================================
+st.markdown("---")
+st.markdown("#### 📚 播放列表")
+
+# 获取历史记录
+try:
+    storage = SupabaseStorage(
+        url=supabase_url,
+        key=supabase_key,
+        bucket=supabase_bucket
+    )
+    podcasts = storage.list_podcasts(limit=10)
+except Exception as e:
+    podcasts = []
+    st.caption(f"无法加载播放列表: {e}")
+
+if podcasts:
+    for podcast in podcasts:
+        podcast_id = podcast.get("id", "")
+        title = podcast.get("title", "未命名")
+        created_at = podcast.get("created_at", "")[:10]  # 只显示日期
+        audio_url = podcast.get("audio_url")
+        
+        # 显示每个播客条目
+        with st.expander(f"🎧 {title} ({created_at})"):
+            # 音频播放
+            if audio_url:
+                st.audio(audio_url, format="audio/mp3")
+            
+            # 加载脚本
+            script_url = podcast.get("script_url")
+            if script_url:
+                if st.button(f"📜 查看脚本", key=f"script_{podcast_id}"):
+                    script_content = storage.get_script_content(script_url)
+                    if script_content:
+                        st.text(script_content)
+                    else:
+                        st.warning("无法加载脚本")
+            
+            # 来源链接
+            source_urls = podcast.get("source_urls", [])
+            if source_urls:
+                st.caption("来源: " + ", ".join([f"[链接]({url})" for url in source_urls[:3]]))
+else:
+    st.caption("暂无历史记录")
+
+# ==========================================
+# 执行生成流程
 # ==========================================
 if run_button:
     if not api_key:
@@ -176,7 +213,6 @@ if run_button:
     st.session_state.result = None
     st.session_state.cloud_urls = None
     
-    # 创建配置
     config = PodcastConfig(
         api_key=api_key,
         enable_audio_generation=enable_audio,
@@ -191,10 +227,8 @@ if run_button:
         urls=url_list
     )
     
-    # 进度显示
     progress_bar = st.progress(0, text="准备中...")
     
-    # 日志收集（线程安全）
     import threading
     logs = []
     logs_lock = threading.Lock()
@@ -205,11 +239,10 @@ if run_button:
     
     stage_names = {
         "fetching": "抓取中",
-        "analyzing": "分析中",
+        "analyzing": "分析中", 
         "writing": "撰写中",
         "tts": "合成中",
         "merging": "合并中",
-        "uploading": "上传中",
         "complete": "完成"
     }
     
@@ -217,7 +250,6 @@ if run_button:
         stage_name = stage_names.get(stage, stage)
         progress_bar.progress(progress, text=f"{stage_name} {progress*100:.0f}%")
     
-    # 运行流水线
     pipeline = PodcastPipeline(config)
     pipeline.set_log_callback(log_callback)
     pipeline.set_progress_callback(progress_callback)
@@ -225,50 +257,37 @@ if run_button:
     with st.spinner("生成中..."):
         result = pipeline.run()
     
-    # 上传到云存储
-    cloud_urls = None
-    if result.success and enable_cloud_storage and supabase_url and supabase_key:
-        progress_bar.progress(0.95, text="上传到云存储...")
+    # 保存到云端
+    cloud_result = None
+    if result.success and enable_cloud and supabase_url and supabase_key:
+        progress_bar.progress(0.95, text="保存到云端...")
         log_callback("")
-        log_callback("=" * 50)
-        log_callback("☁️ 上传到 Supabase Storage")
-        log_callback("=" * 50)
+        log_callback("☁️ 保存到云端...")
         
         try:
-            storage = SupabaseStorage(
-                url=supabase_url,
-                key=supabase_key,
-                bucket=supabase_bucket
-            )
+            # 生成标题
+            final_title = podcast_title.strip() if podcast_title.strip() else f"Podcast {len(podcasts) + 1}"
             
-            cloud_urls = storage.upload_results(
+            cloud_result = storage.save_podcast(
+                title=final_title,
                 audio_bytes=result.audio_data,
-                script_text=result.script_text
+                script_text=result.script_text,
+                source_urls=url_list
             )
             
-            # 记录上传结果
-            if cloud_urls.get("audio", {}).get("success"):
-                log_callback(f"✅ 音频上传成功")
-                log_callback(f"   URL: {cloud_urls['audio']['url']}")
+            if cloud_result.get("success"):
+                log_callback(f"✅ 保存成功: {final_title}")
             else:
-                log_callback(f"❌ 音频上传失败: {cloud_urls.get('audio', {}).get('message', '未知错误')}")
-            
-            if cloud_urls.get("script", {}).get("success"):
-                log_callback(f"✅ 脚本上传成功")
-                log_callback(f"   URL: {cloud_urls['script']['url']}")
-            else:
-                log_callback(f"❌ 脚本上传失败: {cloud_urls.get('script', {}).get('message', '未知错误')}")
+                log_callback(f"⚠️ {cloud_result.get('message', '保存失败')}")
                 
         except Exception as e:
-            log_callback(f"❌ 云存储错误: {type(e).__name__}: {e}")
+            log_callback(f"❌ 云存储错误: {e}")
     
-    # 保存结果
     with logs_lock:
         st.session_state.logs = list(logs)
     st.session_state.result = result
-    st.session_state.cloud_urls = cloud_urls
+    st.session_state.cloud_urls = cloud_result
     st.session_state.is_running = False
     
-    # 清除进度条并刷新
     progress_bar.empty()
     st.rerun()

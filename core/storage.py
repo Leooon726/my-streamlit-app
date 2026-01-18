@@ -1,7 +1,7 @@
 """
 存储模块：Supabase Storage 集成
 """
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime
 import hashlib
 
@@ -22,135 +22,181 @@ class SupabaseStorage:
         self.bucket = bucket
         self.client: Client = create_client(url, key)
     
-    def _generate_filename(self, prefix: str, ext: str) -> str:
-        """生成唯一文件名"""
+    def _generate_id(self) -> str:
+        """生成唯一 ID"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 添加短 hash 避免冲突
-        hash_suffix = hashlib.md5(f"{timestamp}{prefix}".encode()).hexdigest()[:6]
-        return f"{prefix}_{timestamp}_{hash_suffix}.{ext}"
+        hash_suffix = hashlib.md5(f"{timestamp}".encode()).hexdigest()[:6]
+        return f"{timestamp}_{hash_suffix}"
     
     def upload_audio(
         self,
         audio_bytes: bytes,
-        filename: Optional[str] = None
-    ) -> Tuple[bool, str, Optional[str]]:
-        """
-        上传音频文件
-        
-        Args:
-            audio_bytes: 音频二进制数据
-            filename: 可选的文件名，不提供则自动生成
-            
-        Returns:
-            (success, message, public_url)
-        """
+        podcast_id: str
+    ) -> Tuple[bool, Optional[str]]:
+        """上传音频文件"""
         if not audio_bytes:
-            return False, "音频数据为空", None
+            return False, None
         
-        if not filename:
-            filename = self._generate_filename("podcast", "mp3")
-        
-        # 确保文件名在 audio 文件夹下
-        filepath = f"audio/{filename}"
+        filepath = f"audio/{podcast_id}.mp3"
         
         try:
-            # 上传文件
-            result = self.client.storage.from_(self.bucket).upload(
+            self.client.storage.from_(self.bucket).upload(
                 path=filepath,
                 file=audio_bytes,
                 file_options={"content-type": "audio/mpeg"}
             )
-            
-            # 获取公开 URL
             public_url = self.client.storage.from_(self.bucket).get_public_url(filepath)
-            
-            return True, f"上传成功: {filepath}", public_url
-            
+            return True, public_url
         except Exception as e:
-            return False, f"上传失败: {type(e).__name__}: {e}", None
+            print(f"Audio upload error: {e}")
+            return False, None
     
     def upload_script(
         self,
         script_text: str,
-        filename: Optional[str] = None
-    ) -> Tuple[bool, str, Optional[str]]:
-        """
-        上传脚本文件
-        
-        Args:
-            script_text: 脚本文本内容
-            filename: 可选的文件名，不提供则自动生成
-            
-        Returns:
-            (success, message, public_url)
-        """
+        podcast_id: str
+    ) -> Tuple[bool, Optional[str]]:
+        """上传脚本文件"""
         if not script_text:
-            return False, "脚本内容为空", None
+            return False, None
         
-        if not filename:
-            filename = self._generate_filename("script", "txt")
-        
-        # 确保文件名在 scripts 文件夹下
-        filepath = f"scripts/{filename}"
+        filepath = f"scripts/{podcast_id}.txt"
         
         try:
-            # 转换为 bytes
             script_bytes = script_text.encode('utf-8')
-            
-            # 上传文件
-            result = self.client.storage.from_(self.bucket).upload(
+            self.client.storage.from_(self.bucket).upload(
                 path=filepath,
                 file=script_bytes,
                 file_options={"content-type": "text/plain; charset=utf-8"}
             )
-            
-            # 获取公开 URL
             public_url = self.client.storage.from_(self.bucket).get_public_url(filepath)
-            
-            return True, f"上传成功: {filepath}", public_url
-            
+            return True, public_url
         except Exception as e:
-            return False, f"上传失败: {type(e).__name__}: {e}", None
+            print(f"Script upload error: {e}")
+            return False, None
     
-    def upload_results(
+    def save_podcast(
         self,
+        title: str,
         audio_bytes: Optional[bytes],
-        script_text: Optional[str]
-    ) -> dict:
+        script_text: Optional[str],
+        source_urls: List[str] = None
+    ) -> Dict[str, Any]:
         """
-        上传所有结果文件
+        保存播客（上传文件 + 保存元数据到数据库）
         
         Returns:
             {
-                "audio": {"success": bool, "message": str, "url": str},
-                "script": {"success": bool, "message": str, "url": str}
+                "success": bool,
+                "id": str,
+                "audio_url": str,
+                "script_url": str,
+                "message": str
             }
         """
-        results = {}
-        
-        # 生成统一的时间戳前缀
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        hash_suffix = hashlib.md5(timestamp.encode()).hexdigest()[:6]
-        base_name = f"podcast_{timestamp}_{hash_suffix}"
+        podcast_id = self._generate_id()
+        result = {
+            "success": False,
+            "id": podcast_id,
+            "audio_url": None,
+            "script_url": None,
+            "message": ""
+        }
         
         # 上传音频
         if audio_bytes:
-            success, msg, url = self.upload_audio(
-                audio_bytes, 
-                f"{base_name}.mp3"
-            )
-            results["audio"] = {"success": success, "message": msg, "url": url}
-        else:
-            results["audio"] = {"success": False, "message": "无音频数据", "url": None}
+            success, url = self.upload_audio(audio_bytes, podcast_id)
+            if success:
+                result["audio_url"] = url
         
         # 上传脚本
         if script_text:
-            success, msg, url = self.upload_script(
-                script_text,
-                f"{base_name}.txt"
-            )
-            results["script"] = {"success": success, "message": msg, "url": url}
-        else:
-            results["script"] = {"success": False, "message": "无脚本内容", "url": None}
+            success, url = self.upload_script(script_text, podcast_id)
+            if success:
+                result["script_url"] = url
         
-        return results
+        # 保存元数据到数据库
+        try:
+            metadata = {
+                "id": podcast_id,
+                "title": title,
+                "audio_url": result["audio_url"],
+                "script_url": result["script_url"],
+                "source_urls": source_urls or [],
+                "created_at": datetime.now().isoformat()
+            }
+            
+            self.client.table("podcasts").insert(metadata).execute()
+            result["success"] = True
+            result["message"] = "保存成功"
+            
+        except Exception as e:
+            # 如果数据库保存失败，文件仍然上传成功
+            result["success"] = result["audio_url"] is not None or result["script_url"] is not None
+            result["message"] = f"文件已上传，但元数据保存失败: {e}"
+        
+        return result
+    
+    def list_podcasts(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        获取播客列表
+        
+        Returns:
+            [{"id", "title", "audio_url", "script_url", "created_at", "source_urls"}, ...]
+        """
+        try:
+            response = self.client.table("podcasts") \
+                .select("*") \
+                .order("created_at", desc=True) \
+                .limit(limit) \
+                .execute()
+            
+            return response.data or []
+            
+        except Exception as e:
+            print(f"List podcasts error: {e}")
+            return []
+    
+    def get_podcast(self, podcast_id: str) -> Optional[Dict[str, Any]]:
+        """获取单个播客详情"""
+        try:
+            response = self.client.table("podcasts") \
+                .select("*") \
+                .eq("id", podcast_id) \
+                .single() \
+                .execute()
+            
+            return response.data
+            
+        except Exception as e:
+            print(f"Get podcast error: {e}")
+            return None
+    
+    def get_script_content(self, script_url: str) -> Optional[str]:
+        """从 URL 获取脚本内容"""
+        try:
+            import requests
+            response = requests.get(script_url, timeout=10)
+            if response.status_code == 200:
+                return response.text
+            return None
+        except Exception as e:
+            print(f"Get script error: {e}")
+            return None
+    
+    def delete_podcast(self, podcast_id: str) -> bool:
+        """删除播客"""
+        try:
+            # 删除文件
+            self.client.storage.from_(self.bucket).remove([
+                f"audio/{podcast_id}.mp3",
+                f"scripts/{podcast_id}.txt"
+            ])
+            
+            # 删除数据库记录
+            self.client.table("podcasts").delete().eq("id", podcast_id).execute()
+            
+            return True
+        except Exception as e:
+            print(f"Delete podcast error: {e}")
+            return False

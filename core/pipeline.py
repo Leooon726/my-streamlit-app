@@ -1,18 +1,24 @@
 """
 主流程模块：协调各模块完成播客生成
+
+架构：
+- Stage 1: Jina 抓取 (并行)
+- Stage 2: LLM 分析 (并行)
+- Stage 3: LLM 统一撰写脚本 (串行)
+- Stage 4: TTS 生成音频 (并行)
+- Stage 5: 音频合并 (串行)
 """
 import io
-from typing import Optional, Callable, List, Dict, Any
+from typing import Optional, Callable, List, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from functools import partial
 
 from pydub import AudioSegment
 
 from .config import PodcastConfig
 from .fetcher import fetch_content_with_jina
-from .llm import process_article
-from .audio import generate_audio_for_script
+from .llm import analyze_article, generate_unified_script
+from .audio import generate_audio_parallel, merge_audio_segments
 
 
 @dataclass
@@ -56,105 +62,86 @@ class PodcastPipeline:
         if self.progress_callback:
             self.progress_callback(stage, progress)
     
-    def _fetch_task(self, task_data):
-        """抓取任务包装器"""
-        index, url = task_data
-        self.log(f"🌍 [Task {index+1}] 开始抓取")
-        self.log(f"   URL: {url}")
-        text = fetch_content_with_jina(url, log_func=self.log)
-        
-        if text:
-            self.log(f"🌍 [Task {index+1}] ✅ 抓取完成: {len(text)} 字符")
-        else:
-            self.log(f"🌍 [Task {index+1}] ❌ 抓取失败")
-            
-        return index, url, text
-    
-    def _process_task(self, fetch_result):
-        """LLM 处理任务包装器"""
-        index, url, raw_text = fetch_result
-        return process_article(
-            self.config,
-            index,
-            url,
-            raw_text,
-            log_func=self.log
-        )
-    
     def run(self) -> PipelineResult:
         """
         执行完整的播客生成流程
-        
-        Returns:
-            PipelineResult 对象
         """
         # 验证配置
         valid, error = self.config.validate()
         if not valid:
             return PipelineResult(success=False, error_message=error)
         
-        # 打印配置信息
+        # 打印配置信息和架构说明
         self.log(f"{'='*60}")
+        self.log(f"🎙️ AI Podcast Generator")
+        self.log(f"{'='*60}")
+        self.log(f"")
         self.log(f"📋 配置信息:")
         self.log(f"   模式: {self.config.podcast_mode}")
-        self.log(f"   LLM 模型: {self.config.llm_model_name}")
-        self.log(f"   TTS 模型: {self.config.tts_model_name}")
+        self.log(f"   LLM: {self.config.llm_model_name}")
+        self.log(f"   TTS: {self.config.tts_model_name}")
         self.log(f"   音色 A: {self.config.voice_a_full}")
         self.log(f"   音色 B: {self.config.voice_b_full}")
         self.log(f"   音频生成: {'启用' if self.config.enable_audio_generation else '禁用'}")
-        self.log(f"   并发设置:")
-        self.log(f"      Jina: {self.config.max_workers_jina}")
-        self.log(f"      LLM: {self.config.max_workers_llm}")
-        self.log(f"      TTS: {self.config.max_workers_tts}")
+        self.log(f"")
+        self.log(f"🏗️ 处理架构:")
+        self.log(f"   Stage 1: Jina 抓取    [并行 x{self.config.max_workers_jina}]")
+        self.log(f"   Stage 2: LLM 分析     [并行 x{self.config.max_workers_llm}]")
+        self.log(f"   Stage 3: 统一撰写脚本 [串行 - 保证连贯性]")
+        self.log(f"   Stage 4: TTS 生成     [并行 x{self.config.max_workers_tts}]")
+        self.log(f"   Stage 5: 音频合并     [串行 - 按顺序拼接]")
         self.log(f"{'='*60}")
             
         urls = self.config.urls
         stats = {
             "total_urls": len(urls),
             "fetched": 0,
-            "processed": 0,
-            "audio_generated": 0
+            "analyzed": 0,
+            "script_lines": 0,
+            "audio_segments": 0,
         }
         
-        full_text_log = "=== AI Podcast Script ===\n\n"
-        final_mix = AudioSegment.empty()
-        transition = AudioSegment.silent(duration=1000)
-        
-        # 容器
-        fetched_data = []  # (index, url, raw_text)
-        processed_scripts = [None] * len(urls)  # (readable, json)
-        
         # ==========================================
-        # Stage 1: Jina Fetching
+        # Stage 1: Jina Fetching (并行)
         # ==========================================
         self.log(f"")
         self.log(f"{'='*60}")
-        self.log(f"🚀 STAGE 1: Jina Fetching")
+        self.log(f"🚀 STAGE 1: Jina 抓取 [并行 x{self.config.max_workers_jina}]")
         self.log(f"{'='*60}")
-        self.log(f"Workers: {self.config.max_workers_jina}")
-        self.log(f"URLs ({len(urls)}):")
+        self.log(f"   URLs ({len(urls)}):")
         for i, url in enumerate(urls):
-            self.log(f"   [{i+1}] {url}")
+            self.log(f"      [{i+1}] {url}")
         self.log(f"")
         
         self.update_progress("fetching", 0.0)
         
-        tasks = [(i, u) for i, u in enumerate(urls)]
+        fetched_data = []  # [(index, url, content), ...]
         
-        # 顺序执行以便日志更清晰（Jina 并发度低）
-        for i, task in enumerate(tasks):
-            res = self._fetch_task(task)
-            self.update_progress("fetching", (i + 1) / len(tasks))
+        with ThreadPoolExecutor(max_workers=self.config.max_workers_jina) as executor:
+            futures = {}
+            for i, url in enumerate(urls):
+                future = executor.submit(
+                    self._fetch_task, i, url
+                )
+                futures[future] = i
             
-            if res[2]:
-                fetched_data.append(res)
-                stats["fetched"] += 1
-            self.log(f"")
+            for future in as_completed(futures):
+                idx, url, content = future.result()
+                self.update_progress("fetching", len(fetched_data) / len(urls))
+                
+                if content:
+                    fetched_data.append((idx, url, content))
+                    stats["fetched"] += 1
+                    self.log(f"   ✅ [{idx+1}] 成功: {len(content)} 字符")
+                else:
+                    self.log(f"   ❌ [{idx+1}] 失败: {url[:50]}...")
         
+        self.update_progress("fetching", 1.0)
+        self.log(f"")
         self.log(f"📊 Stage 1 完成: {stats['fetched']}/{len(urls)} 成功")
                     
         if not fetched_data:
-            self.log(f"❌ 所有链接抓取失败，停止运行")
+            self.log(f"❌ 所有链接抓取失败")
             return PipelineResult(
                 success=False,
                 error_message="所有链接抓取失败",
@@ -162,123 +149,172 @@ class PodcastPipeline:
             )
             
         # ==========================================
-        # Stage 2: LLM Processing
+        # Stage 2: LLM 分析 (并行)
         # ==========================================
         self.log(f"")
         self.log(f"{'='*60}")
-        self.log(f"🚀 STAGE 2: LLM Processing")
+        self.log(f"🚀 STAGE 2: LLM 分析 [并行 x{self.config.max_workers_llm}]")
         self.log(f"{'='*60}")
-        self.log(f"Workers: {self.config.max_workers_llm}")
-        self.log(f"待处理: {len(fetched_data)} 篇文章")
+        self.log(f"   待分析: {len(fetched_data)} 篇文章")
+        self.log(f"   注意: 发送全文，无字数截断")
         self.log(f"")
         
-        self.update_progress("processing", 0.0)
+        self.update_progress("analyzing", 0.0)
         
-        # 顺序执行以便日志更清晰
-        for i, fetch_result in enumerate(fetched_data):
-            idx, url, r_text, s_json = self._process_task(fetch_result)
-            self.update_progress("processing", (i + 1) / len(fetched_data))
+        analyses = []  # [(index, url, analysis), ...]
+        
+        with ThreadPoolExecutor(max_workers=self.config.max_workers_llm) as executor:
+            futures = {}
+            for idx, url, content in fetched_data:
+                future = executor.submit(
+                    analyze_article,
+                    self.config, idx, url, content, self.log
+                )
+                futures[future] = idx
             
-            if s_json:
-                processed_scripts[idx] = (r_text, s_json)
-                full_text_log += r_text
-                stats["processed"] += 1
-            self.log(f"")
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                self.update_progress("analyzing", completed / len(fetched_data))
+                
+                idx, url, analysis = future.result()
+                if analysis:
+                    analyses.append((idx, url, analysis))
+                    stats["analyzed"] += 1
         
-        self.log(f"📊 Stage 2 完成: {stats['processed']}/{len(fetched_data)} 成功")
-        self.log(f"📄 文本脚本生成完成")
+        self.log(f"")
+        self.log(f"📊 Stage 2 完成: {stats['analyzed']}/{len(fetched_data)} 成功")
+        
+        if not analyses:
+            self.log(f"❌ 所有文章分析失败")
+            return PipelineResult(
+                success=False,
+                error_message="所有文章分析失败",
+                stats=stats
+            )
         
         # ==========================================
-        # Stage 3: Audio Generation (Optional)
+        # Stage 3: 统一撰写脚本 (串行)
+        # ==========================================
+        self.log(f"")
+        self.log(f"{'='*60}")
+        self.log(f"🚀 STAGE 3: 统一撰写脚本 [串行 - 保证前后文连贯]")
+        self.log(f"{'='*60}")
+        
+        self.update_progress("writing", 0.0)
+        
+        # 按原始顺序排序
+        analyses.sort(key=lambda x: x[0])
+        
+        script_json = generate_unified_script(
+            self.config,
+            analyses,
+            self.log
+        )
+        
+        self.update_progress("writing", 1.0)
+        
+        if not script_json:
+            self.log(f"❌ 脚本生成失败")
+            return PipelineResult(
+                success=False,
+                error_message="脚本生成失败",
+                stats=stats
+            )
+        
+        stats["script_lines"] = len(script_json)
+        
+        # 生成可读脚本文本
+        script_text = "=== AI Podcast Script ===\n\n"
+        for idx, url, _ in analyses:
+            script_text += f"Source {idx+1}: {url}\n"
+        script_text += "\n" + "="*40 + "\n\n"
+        
+        for line in script_json:
+            script_text += f"{line['speaker']}: {line['text']}\n\n"
+        
+        self.log(f"")
+        self.log(f"📊 Stage 3 完成: 生成 {len(script_json)} 行对话")
+        
+        # ==========================================
+        # Stage 4 & 5: 音频生成和合并
         # ==========================================
         audio_bytes = None
         
         if self.config.enable_audio_generation:
+            # Stage 4: TTS 并行生成
             self.log(f"")
             self.log(f"{'='*60}")
-            self.log(f"🚀 STAGE 3: Audio Generation")
+            self.log(f"🚀 STAGE 4: TTS 生成 [并行 x{self.config.max_workers_tts}]")
             self.log(f"{'='*60}")
-            self.log(f"Workers: {self.config.max_workers_tts}")
             
-            scripts_to_process = [(i, s) for i, s in enumerate(processed_scripts) if s]
-            self.log(f"待合成: {len(scripts_to_process)} 篇文章")
+            self.update_progress("tts", 0.0)
             
-            total_lines = sum(len(s[1]) for _, s in scripts_to_process)
-            self.log(f"总对话行数: {total_lines}")
-            self.log(f"")
+            audio_segments, audio_errors = generate_audio_parallel(
+                self.config,
+                script_json,
+                self.log
+            )
             
-            self.update_progress("audio", 0.0)
+            self.update_progress("tts", 1.0)
             
-            processed_lines = 0
+            stats["audio_segments"] = len(audio_segments)
             
-            for article_idx, (i, script_data) in enumerate(scripts_to_process):
-                r_text, s_json = script_data
-                self.log(f"🎙️ Article {i+1}: 开始合成 {len(s_json)} 行对话")
-                self.log(f"   调用 generate_audio_for_script...")
-                
-                def audio_progress(current, total):
-                    nonlocal processed_lines
-                    overall = (processed_lines + current) / total_lines if total_lines > 0 else 0
-                    self.update_progress("audio", overall)
-                
-                try:
-                    article_audio = generate_audio_for_script(
-                        self.config,
-                        s_json,
-                        progress_callback=audio_progress,
-                        log_func=self.log
-                    )
-                    
-                    self.log(f"   generate_audio_for_script 返回，音频长度: {len(article_audio)}ms")
-                    
-                except Exception as e:
-                    self.log(f"   ❌ generate_audio_for_script 异常:")
-                    self.log(f"      {type(e).__name__}: {e}")
-                    import traceback
-                    self.log(f"      Traceback: {traceback.format_exc()}")
-                    article_audio = AudioSegment.empty()
-                
-                processed_lines += len(s_json)
-                
-                if len(article_audio) > 0:
-                    final_mix += article_audio
-                    final_mix += transition
-                    stats["audio_generated"] += 1
-                    self.log(f"✅ Article {i+1} 完成，时长: {len(article_audio)/1000:.1f}s")
-                else:
-                    self.log(f"❌ Article {i+1} 音频为空")
-                
-                self.log(f"")
-                        
-            # 导出音频
-            if len(final_mix) > 0:
-                buffer = io.BytesIO()
-                final_mix.export(buffer, format="mp3")
-                audio_bytes = buffer.getvalue()
-                self.log(f"🎉 音频导出完成!")
-                self.log(f"   总时长: {len(final_mix)/1000:.1f} 秒")
-                self.log(f"   文件大小: {len(audio_bytes)/1024:.1f} KB")
+            if not audio_segments:
+                self.log(f"❌ 所有音频生成失败")
             else:
-                self.log(f"⚠️ 未生成任何音频")
+                # Stage 5: 音频合并 (串行)
+                self.log(f"")
+                self.log(f"{'='*60}")
+                self.log(f"🚀 STAGE 5: 音频合并 [串行 - 按顺序拼接]")
+                self.log(f"{'='*60}")
+                
+                self.update_progress("merging", 0.0)
+                
+                final_audio = merge_audio_segments(audio_segments, self.log)
+                
+                self.update_progress("merging", 1.0)
+                
+                if len(final_audio) > 0:
+                    buffer = io.BytesIO()
+                    final_audio.export(buffer, format="mp3")
+                    audio_bytes = buffer.getvalue()
+                    
+                    self.log(f"")
+                    self.log(f"🎉 音频导出完成!")
+                    self.log(f"   文件大小: {len(audio_bytes)/1024:.1f} KB")
+                else:
+                    self.log(f"⚠️ 音频合并后为空")
         else:
             self.log(f"")
             self.log(f"⚪ 音频生成已跳过（未启用）")
         
+        # ==========================================
+        # 最终汇总
+        # ==========================================
         self.log(f"")
         self.log(f"{'='*60}")
         self.log(f"📊 最终统计")
         self.log(f"{'='*60}")
         self.log(f"   链接总数: {stats['total_urls']}")
         self.log(f"   抓取成功: {stats['fetched']}")
-        self.log(f"   LLM 处理成功: {stats['processed']}")
-        self.log(f"   音频生成成功: {stats['audio_generated']}")
+        self.log(f"   分析成功: {stats['analyzed']}")
+        self.log(f"   脚本行数: {stats['script_lines']}")
+        self.log(f"   音频片段: {stats['audio_segments']}")
         self.log(f"{'='*60}")
+        self.log(f"✅ 处理完成!")
             
         self.update_progress("complete", 1.0)
         
         return PipelineResult(
             success=True,
-            script_text=full_text_log,
+            script_text=script_text,
             audio_data=audio_bytes,
             stats=stats
         )
+    
+    def _fetch_task(self, index: int, url: str) -> Tuple[int, str, Optional[str]]:
+        """抓取任务（供并行调用）"""
+        self.log(f"   🌍 [{index+1}] 开始抓取: {url[:50]}...")
+        content = fetch_content_with_jina(url, log_func=self.log)
+        return index, url, content

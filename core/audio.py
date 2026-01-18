@@ -23,7 +23,6 @@ def generate_audio_segment(
     生成单段音频
     """
     if not text or len(text.strip()) == 0:
-        log_func(f"      ⚠️ [Segment {index}] 文本为空，跳过")
         return index, None, "文本为空"
         
     url = "https://api.siliconflow.cn/v1/audio/speech"
@@ -41,7 +40,6 @@ def generate_audio_segment(
         voice_id = config.voice_b_full
     else:
         voice_id = config.voice_a_full
-        log_func(f"      ⚠️ [Segment {index}] 未知 speaker '{speaker}'，使用默认音色 A")
 
     payload = {
         "model": config.tts_model_name,
@@ -51,196 +49,167 @@ def generate_audio_segment(
         "stream": False
     }
     
-    text_preview = text[:50].replace('\n', ' ') + ("..." if len(text) > 50 else "")
-    log_func(f"      🎤 [Segment {index}] Speaker: {speaker}")
-    log_func(f"         Voice: {voice_id}")
-    log_func(f"         Text: {text_preview}")
-    log_func(f"         Model: {config.tts_model_name}")
+    text_preview = text[:40].replace('\n', ' ') + ("..." if len(text) > 40 else "")
+    log_func(f"      🎤 [Seg {index}] {speaker} | {text_preview}")
     
     last_error = ""
     for attempt in range(3):
         try:
-            log_func(f"         📤 发送请求... [Attempt {attempt+1}/3]")
             response = requests.post(url, json=payload, headers=headers, timeout=60)
-            
-            log_func(f"         📥 HTTP Status: {response.status_code}")
             
             if response.status_code == 200:
                 content = response.content
-                content_type = response.headers.get('Content-Type', 'unknown')
-                log_func(f"         Content-Type: {content_type}")
-                log_func(f"         Content-Length: {len(content)} bytes")
-                
-                if content and len(content) > 100:  # MP3 至少应该有几百字节
-                    log_func(f"      ✅ [Segment {index}] 成功!")
+                if content and len(content) > 100:
+                    log_func(f"      ✅ [Seg {index}] {len(content)} bytes")
                     return index, content, None
                 else:
-                    # 可能返回的是错误信息而不是音频
                     try:
-                        error_text = content.decode('utf-8')[:500]
-                        log_func(f"      ❌ [Segment {index}] 返回内容太小，可能是错误:")
-                        log_func(f"         {error_text}")
-                        last_error = f"返回内容异常: {error_text[:100]}"
+                        error_text = content.decode('utf-8')[:200]
+                        last_error = f"返回异常: {error_text}"
                     except:
-                        log_func(f"      ❌ [Segment {index}] 返回内容太小: {len(content)} bytes")
-                        last_error = f"返回内容太小: {len(content)} bytes"
+                        last_error = f"返回太小: {len(content)} bytes"
                     
             elif response.status_code == 429:
                 wait = 2 + attempt * 2
-                log_func(f"      ⏳ [Segment {index}] 限流 (429)，等待 {wait}秒...")
+                log_func(f"      ⏳ [Seg {index}] 限流，等待 {wait}s...")
                 time.sleep(wait)
                 last_error = "API 限流"
                 continue
                 
-            elif response.status_code == 400:
-                error_text = response.text[:500]
-                log_func(f"      ❌ [Segment {index}] 请求错误 (400):")
-                log_func(f"         {error_text}")
-                last_error = f"400 Bad Request: {error_text[:200]}"
-                break
-                
-            elif response.status_code == 401:
-                log_func(f"      ❌ [Segment {index}] 认证失败 (401)")
-                log_func(f"         API Key 可能无效或已过期")
-                last_error = "API Key 无效 (401)"
-                break
-                
-            elif response.status_code == 404:
-                error_text = response.text[:500]
-                log_func(f"      ❌ [Segment {index}] 资源不存在 (404):")
-                log_func(f"         {error_text}")
-                log_func(f"         可能是模型名称或音色 ID 错误")
-                last_error = f"404 Not Found: {error_text[:200]}"
-                break
-                
             else:
-                error_text = response.text[:500]
-                log_func(f"      ❌ [Segment {index}] HTTP {response.status_code}:")
-                log_func(f"         {error_text}")
-                last_error = f"HTTP {response.status_code}: {error_text[:200]}"
-                if attempt < 2:
-                    time.sleep(1)
+                error_text = response.text[:200]
+                log_func(f"      ❌ [Seg {index}] HTTP {response.status_code}: {error_text}")
+                last_error = f"HTTP {response.status_code}"
+                break
                     
         except requests.exceptions.Timeout:
-            log_func(f"      ⏱️ [Segment {index}] 请求超时 (60s) [Attempt {attempt+1}/3]")
-            last_error = "请求超时"
-            if attempt < 2:
-                time.sleep(1)
-        except requests.exceptions.ConnectionError as e:
-            log_func(f"      ❌ [Segment {index}] 连接错误: {e}")
-            last_error = f"连接错误: {str(e)[:100]}"
-            if attempt < 2:
-                time.sleep(1)
+            log_func(f"      ⏱️ [Seg {index}] 超时 [Attempt {attempt+1}/3]")
+            last_error = "超时"
         except Exception as e:
-            log_func(f"      ❌ [Segment {index}] 异常: {type(e).__name__}: {e}")
-            last_error = f"{type(e).__name__}: {str(e)[:100]}"
+            log_func(f"      ❌ [Seg {index}] {type(e).__name__}: {e}")
+            last_error = str(e)
             break
     
-    log_func(f"      ❌ [Segment {index}] 最终失败: {last_error}")
     return index, None, last_error
 
 
-def generate_audio_for_script(
+def generate_audio_parallel(
     config: PodcastConfig,
     script_json: List[Dict[str, str]],
-    progress_callback: Callable[[int, int], None] = None,
     log_func: Callable[[str], None] = print
-) -> AudioSegment:
+) -> Tuple[List[Tuple[int, bytes]], List[Tuple[int, str]]]:
     """
-    为整个脚本生成音频
+    并行生成所有音频段
+    
+    Returns:
+        (成功列表, 失败列表)
     """
-    # 验证 log_func 是否可用
-    log_func(f"   ========== generate_audio_for_script 开始 ==========")
-    log_func(f"   📋 脚本共 {len(script_json)} 行")
-    log_func(f"   🔧 TTS 配置:")
+    log_func(f"   🚀 并行 TTS 生成")
+    log_func(f"      Workers: {config.max_workers_tts}")
+    log_func(f"      Segments: {len(script_json)}")
     log_func(f"      Model: {config.tts_model_name}")
     log_func(f"      Voice A: {config.voice_a_full}")
     log_func(f"      Voice B: {config.voice_b_full}")
-    log_func(f"      Workers: {config.max_workers_tts}")
-    
-    # 验证 API Key
-    if not config.api_key:
-        log_func(f"   ❌ API Key 为空!")
-        return AudioSegment.empty()
-    log_func(f"      API Key: {config.api_key[:10]}...{config.api_key[-4:]}")
-    
-    # 显示脚本内容预览
-    log_func(f"   📜 脚本预览:")
-    for i, line in enumerate(script_json[:3]):  # 只显示前3行
-        text_preview = line.get('text', '')[:40].replace('\n', ' ')
-        log_func(f"      [{i}] {line.get('speaker', '?')}: {text_preview}...")
-    if len(script_json) > 3:
-        log_func(f"      ... 还有 {len(script_json) - 3} 行")
-    
-    log_func(f"   🚀 开始顺序 TTS 合成（便于调试）...")
+    log_func(f"")
     
     results = []
     errors = []
     
-    # 顺序处理（便于调试）
+    # 过滤有效 segments
     valid_segments = []
     for i, line in enumerate(script_json):
         txt = line.get('text', '')
         if txt and txt.strip():
             valid_segments.append((i, txt, line.get('speaker', '')))
-        else:
-            log_func(f"      ⚠️ [Segment {i}] 跳过空文本")
     
-    log_func(f"   📤 共 {len(valid_segments)} 个有效 TTS 任务")
+    log_func(f"   📤 提交 {len(valid_segments)} 个 TTS 任务...")
     
-    total = len(valid_segments)
-    for completed, (i, txt, speaker) in enumerate(valid_segments, 1):
-        log_func(f"")
-        log_func(f"   --- Segment {i}/{total} ---")
-        
-        try:
-            idx, audio_data, error = generate_audio_segment(
+    # 并行执行
+    with ThreadPoolExecutor(max_workers=config.max_workers_tts) as executor:
+        futures = {}
+        for i, txt, speaker in valid_segments:
+            future = executor.submit(
+                generate_audio_segment,
                 config, i, txt, speaker, log_func
             )
+            futures[future] = i
+        
+        completed = 0
+        total = len(futures)
+        
+        for future in as_completed(futures):
+            completed += 1
+            idx, audio_data, error = future.result()
             
-            if progress_callback:
-                progress_callback(completed, total)
-                
             if audio_data:
                 results.append((idx, audio_data))
-                log_func(f"   ✅ Segment {i} 完成")
             else:
-                errors.append((idx, error))
-                log_func(f"   ❌ Segment {i} 失败: {error}")
-        except Exception as e:
-            log_func(f"   ❌ Segment {i} 异常: {type(e).__name__}: {e}")
-            errors.append((i, str(e)))
+                errors.append((idx, error or "未知错误"))
+            
+            # 每完成 5 个或全部完成时汇报进度
+            if completed % 5 == 0 or completed == total:
+                log_func(f"   📊 TTS 进度: {completed}/{total}")
     
-    # 汇总统计
     log_func(f"")
     log_func(f"   {'='*40}")
-    log_func(f"   📊 TTS 合成统计:")
+    log_func(f"   📊 TTS 并行生成完成")
     log_func(f"      成功: {len(results)}/{total}")
     log_func(f"      失败: {len(errors)}/{total}")
     
     if errors:
         log_func(f"   ⚠️ 失败详情:")
-        for idx, err in errors:
+        for idx, err in errors[:5]:
             log_func(f"      - Segment {idx}: {err}")
+        if len(errors) > 5:
+            log_func(f"      ... 还有 {len(errors) - 5} 个")
+    
     log_func(f"   {'='*40}")
-                
-    # 按顺序排列
-    results.sort(key=lambda x: x[0])
     
-    # 合成音频
-    log_func(f"   🔧 合并音频片段...")
+    return results, errors
+
+
+def merge_audio_segments(
+    audio_segments: List[Tuple[int, bytes]],
+    log_func: Callable[[str], None] = print
+) -> AudioSegment:
+    """
+    按顺序合并音频段（单线程）
+    
+    Args:
+        audio_segments: [(index, audio_bytes), ...] 列表
+        log_func: 日志函数
+        
+    Returns:
+        合并后的 AudioSegment
+    """
+    log_func(f"")
+    log_func(f"   🔧 单线程合并音频（按顺序拼接）")
+    log_func(f"      待合并: {len(audio_segments)} 个片段")
+    
+    # 按 index 排序
+    sorted_segments = sorted(audio_segments, key=lambda x: x[0])
+    
     full_track = AudioSegment.empty()
-    pause = AudioSegment.silent(duration=400)
+    pause = AudioSegment.silent(duration=400)  # 400ms 停顿
     
-    for idx, audio_bytes in results:
+    success_count = 0
+    fail_count = 0
+    
+    for idx, audio_bytes in sorted_segments:
         try:
             seg = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
             full_track += seg + pause
+            success_count += 1
             log_func(f"      ✅ Segment {idx}: {len(seg)}ms")
         except Exception as e:
-            log_func(f"      ❌ Segment {idx} 合并失败: {type(e).__name__}: {e}")
+            fail_count += 1
+            log_func(f"      ❌ Segment {idx}: {type(e).__name__}: {e}")
     
     duration_sec = len(full_track) / 1000
-    log_func(f"   🎵 最终音频: {duration_sec:.1f} 秒 ({len(full_track)}ms)")
-            
+    log_func(f"")
+    log_func(f"   🎵 合并完成")
+    log_func(f"      成功片段: {success_count}")
+    log_func(f"      失败片段: {fail_count}")
+    log_func(f"      总时长: {duration_sec:.1f} 秒")
+    
     return full_track

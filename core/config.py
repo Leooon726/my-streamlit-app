@@ -114,7 +114,7 @@ class PodcastConfig:
     """播客生成器配置类"""
     
     # API 凭证
-    api_key: str = ""
+    api_key: str = "sk-vlmhbxgjgllzolnsqunigerenwtwdfsutvaecdpgpvxqyncc"
     
     # 功能开关
     enable_audio_generation: bool = True

@@ -34,6 +34,7 @@ with st.sidebar:
     st.subheader("🔑 API 凭证")
     api_key = st.text_input(
         "SiliconFlow API Key",
+        value="sk-vlmhbxgjgllzolnsqunigerenwtwdfsutvaecdpgpvxqyncc",
         help="请输入您的 SiliconFlow API Key"
     )
     
@@ -198,9 +199,11 @@ if run_button:
     
     # 进度回调
     stage_names = {
-        "fetching": "🌍 抓取内容",
-        "processing": "🧠 LLM 处理",
-        "audio": "🎙️ 生成音频",
+        "fetching": "🌍 Stage 1: 抓取内容",
+        "analyzing": "🔍 Stage 2: LLM 分析",
+        "writing": "✍️ Stage 3: 撰写脚本",
+        "tts": "🎤 Stage 4: TTS 生成",
+        "merging": "🔧 Stage 5: 音频合并",
         "complete": "✅ 完成"
     }
     
@@ -236,15 +239,17 @@ if st.session_state.result:
     if result.success:
         # 统计信息
         stats = result.stats or {}
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.metric("总链接数", stats.get("total_urls", 0))
+            st.metric("链接数", stats.get("total_urls", 0))
         with col2:
-            st.metric("成功抓取", stats.get("fetched", 0))
+            st.metric("抓取", stats.get("fetched", 0))
         with col3:
-            st.metric("成功处理", stats.get("processed", 0))
+            st.metric("分析", stats.get("analyzed", 0))
         with col4:
-            st.metric("音频生成", stats.get("audio_generated", 0))
+            st.metric("脚本行", stats.get("script_lines", 0))
+        with col5:
+            st.metric("音频段", stats.get("audio_segments", 0))
         
         st.success("✅ 生成完成！")
         

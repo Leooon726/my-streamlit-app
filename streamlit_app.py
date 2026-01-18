@@ -51,8 +51,10 @@ st.markdown("""
     
     /* 按钮美化 */
     .stButton > button {
-        border-radius: 10px;
-        font-weight: 600;
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 0.85rem;
+        padding: 0.3rem 0.8rem;
         transition: all 0.2s;
     }
     
@@ -169,7 +171,7 @@ with st.sidebar:
 # ==========================================
 url_input = st.text_area(
     "输入文章链接（每行一个）",
-    height=100,
+    height=150,
     placeholder="https://example.com/article1\nhttps://example.com/article2",
 )
 

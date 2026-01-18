@@ -281,8 +281,25 @@ if st.session_state.result:
 # 显示日志
 # ==========================================
 if st.session_state.logs:
-    with st.expander("📋 完整运行日志", expanded=False):
-        st.text("\n".join(st.session_state.logs))
+    st.subheader("📋 完整运行日志")
+    
+    # 合并所有日志
+    full_log_text = "\n".join(st.session_state.logs)
+    
+    # 下载日志按钮
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        st.download_button(
+            label="📥 下载日志",
+            data=full_log_text,
+            file_name="podcast_generation_log.txt",
+            mime="text/plain",
+            key="download_log"
+        )
+    
+    # 使用 code 组件显示日志（自带复制按钮）
+    with st.expander("查看完整日志（点击右上角复制）", expanded=False):
+        st.code(full_log_text, language=None)
 
 # ==========================================
 # 页脚

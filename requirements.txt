@@ -1,2 +1,4 @@
 streamlit
 pytz
+requests
+pydub

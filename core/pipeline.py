@@ -25,6 +25,7 @@ from .audio import generate_audio_parallel, merge_audio_segments
 class PipelineResult:
     """流程执行结果"""
     success: bool
+    title: str = ""
     script_text: str = ""
     audio_data: Optional[bytes] = None
     error_message: str = ""
@@ -206,7 +207,7 @@ class PodcastPipeline:
         # 按原始顺序排序
         analyses.sort(key=lambda x: x[0])
         
-        script_json = generate_unified_script(
+        generated_title, script_json = generate_unified_script(
             self.config,
             analyses,
             self.log
@@ -222,10 +223,13 @@ class PodcastPipeline:
                 stats=stats
             )
         
+        # 使用生成的标题，如果没有则使用默认标题
+        podcast_title = generated_title or f"Podcast {len(urls)} 篇文章"
+        
         stats["script_lines"] = len(script_json)
         
         # 生成可读脚本文本
-        script_text = "=== AI Podcast Script ===\n\n"
+        script_text = f"=== {podcast_title} ===\n\n"
         for idx, url, _ in analyses:
             script_text += f"Source {idx+1}: {url}\n"
         script_text += "\n" + "="*40 + "\n\n"
@@ -234,7 +238,7 @@ class PodcastPipeline:
             script_text += f"{line['speaker']}: {line['text']}\n\n"
         
         self.log(f"")
-        self.log(f"📊 Stage 3 完成: 生成 {len(script_json)} 行对话")
+        self.log(f"📊 Stage 3 完成: 标题「{podcast_title}」, {len(script_json)} 行对话")
         
         # ==========================================
         # Stage 4 & 5: 音频生成和合并
@@ -308,6 +312,7 @@ class PodcastPipeline:
         
         return PipelineResult(
             success=True,
+            title=podcast_title,
             script_text=script_text,
             audio_data=audio_bytes,
             stats=stats

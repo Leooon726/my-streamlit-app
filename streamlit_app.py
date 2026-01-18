@@ -87,16 +87,11 @@ url_input = st.text_area(
 
 url_list = [line.strip() for line in url_input.split('\n') if line.strip()]
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    podcast_title = st.text_input("标题", value="", placeholder="可选，留空自动生成")
-with col2:
-    st.write("")  # 占位
-    run_button = st.button(
-        f"🚀 生成 ({len(url_list)})",
-        use_container_width=True,
-        disabled=st.session_state.is_running or len(url_list) == 0
-    )
+run_button = st.button(
+    f"🚀 生成播客 ({len(url_list)} 篇)",
+    use_container_width=True,
+    disabled=st.session_state.is_running or len(url_list) == 0
+)
 
 # ==========================================
 # 显示生成结果
@@ -282,8 +277,8 @@ if run_button:
         log_callback("☁️ 保存到云端...")
         
         try:
-            # 生成标题
-            final_title = podcast_title.strip() if podcast_title.strip() else f"Podcast {len(podcasts) + 1}"
+            # 使用 AI 生成的标题
+            final_title = result.title or f"Podcast {len(podcasts) + 1}"
             
             cloud_result = storage.save_podcast(
                 title=final_title,

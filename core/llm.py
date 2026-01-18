@@ -118,7 +118,7 @@ def generate_unified_script(
     config: PodcastConfig,
     analyses: List[Tuple[int, str, str]],
     log_func: Callable[[str], None] = print
-) -> Optional[List[Dict[str, str]]]:
+) -> Tuple[Optional[str], Optional[List[Dict[str, str]]]]:
     """
     根据所有文章的分析结果，统一撰写一个完整的播客脚本
     
@@ -128,7 +128,7 @@ def generate_unified_script(
         log_func: 日志函数
         
     Returns:
-        解析后的脚本 JSON 列表
+        (title, script_json) 元组
     """
     log_func(f"")
     log_func(f"{'='*60}")
@@ -148,7 +148,7 @@ def generate_unified_script(
     
     prompts = config.get_prompts()
     
-    # 修改 playwright prompt，强调要统一撰写
+    # 修改 playwright prompt，强调要统一撰写，并添加标题生成
     unified_prompt = prompts["playwright"] + """
 
 **额外要求**：
@@ -157,6 +157,22 @@ def generate_unified_script(
 - Host A 负责引导话题转换，如"说完了这篇，我们来看下一个有趣的话题..."
 - 确保整体风格统一，像一期连贯的节目
 - 对话总行数控制在合理范围（每篇文章约5-10行对话）
+
+### ⚠️ 输出格式变更 ⚠️
+请输出一个 JSON 对象，包含 "title" 和 "script" 两个字段：
+
+**✅ 正确格式：**
+{
+  "title": "简洁的中文标题（10字以内，概括本期主题）",
+  "script": [
+    {"speaker": "Host A", "text": "..."},
+    {"speaker": "Host B", "text": "..."}
+  ]
+}
+
+**注意**：
+- title: 简洁有力的中文标题，让听众一眼知道本期内容
+- script: 对话数组，格式与之前相同
 """
     
     log_func(f"   调用 LLM 生成统一脚本...")
@@ -172,27 +188,63 @@ def generate_unified_script(
     
     if not script_raw:
         log_func(f"   ❌ 脚本生成失败")
-        return None
+        return None, None
     
     log_func(f"   原始脚本长度: {len(script_raw)} 字符")
     log_func(f"   解析 JSON...")
     
-    # 解析脚本
-    script_json = smart_parse_script(script_raw)
+    # 解析新格式（包含 title 和 script）
+    title = None
+    script_json = None
+    
+    try:
+        import json
+        import re
+        
+        # 清理 markdown 代码块
+        clean_text = script_raw.strip()
+        if clean_text.startswith("```"):
+            clean_text = re.sub(r"^```(json)?", "", clean_text, flags=re.MULTILINE)
+        if clean_text.endswith("```"):
+            clean_text = re.sub(r"```$", "", clean_text, flags=re.MULTILINE)
+        clean_text = clean_text.strip()
+        
+        data = json.loads(clean_text)
+        
+        if isinstance(data, dict):
+            # 新格式：{"title": "...", "script": [...]}
+            title = data.get("title", "").strip()
+            script_data = data.get("script", [])
+            
+            if isinstance(script_data, list):
+                script_json = [item for item in script_data 
+                              if isinstance(item, dict) and 'speaker' in item and 'text' in item]
+        elif isinstance(data, list):
+            # 兼容旧格式：直接是数组
+            script_json = [item for item in data 
+                          if isinstance(item, dict) and 'speaker' in item and 'text' in item]
+                          
+    except Exception as e:
+        log_func(f"   ⚠️ JSON 解析异常: {e}")
+        # 尝试使用旧的解析器
+        script_json = smart_parse_script(script_raw)
     
     if not script_json:
         log_func(f"   ❌ JSON 解析失败")
         log_func(f"   原始返回:\n{script_raw[:1000]}")
-        return None
+        return None, None
     
-    log_func(f"   ✅ 脚本解析成功，共 {len(script_json)} 行对话")
+    log_func(f"   ✅ 解析成功")
+    if title:
+        log_func(f"   📌 标题: {title}")
+    log_func(f"   📝 脚本: {len(script_json)} 行对话")
     
     # 显示脚本预览
     log_func(f"   脚本预览:")
-    for i, line in enumerate(script_json[:5]):
-        text_preview = line.get('text', '')[:50].replace('\n', ' ')
+    for i, line in enumerate(script_json[:3]):
+        text_preview = line.get('text', '')[:40].replace('\n', ' ')
         log_func(f"      [{i}] {line.get('speaker', '?')}: {text_preview}...")
-    if len(script_json) > 5:
-        log_func(f"      ... 还有 {len(script_json) - 5} 行")
+    if len(script_json) > 3:
+        log_func(f"      ... 还有 {len(script_json) - 3} 行")
     
-    return script_json
+    return title, script_json

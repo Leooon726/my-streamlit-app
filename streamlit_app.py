@@ -1,5 +1,6 @@
 """
 AI Podcast Generator - Streamlit 前端界面
+Version: 2.0.0 - 并行架构重构
 """
 import streamlit as st
 from core import PodcastConfig, PodcastPipeline

@@ -191,12 +191,14 @@ if run_button:
     log_expander = st.expander("📋 运行日志", expanded=True)
     log_placeholder = log_expander.empty()
     
-    # 日志回调
+    # 日志回调（线程安全，不直接更新 UI）
+    import threading
     logs = []
+    logs_lock = threading.Lock()
+    
     def log_callback(message):
-        logs.append(message)
-        # 实时更新同一个 placeholder
-        log_placeholder.code("\n".join(logs[-100:]), language=None)
+        with logs_lock:
+            logs.append(message)
     
     # 进度回调
     stage_names = {
@@ -220,8 +222,13 @@ if run_button:
     with st.spinner("正在生成播客..."):
         result = pipeline.run()
     
+    # 显示最终日志
+    with logs_lock:
+        final_logs = list(logs)
+    log_placeholder.code("\n".join(final_logs), language=None)
+    
     st.session_state.result = result
-    st.session_state.logs = logs
+    st.session_state.logs = final_logs
     st.session_state.is_running = False
     
     # 清除进度条

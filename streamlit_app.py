@@ -171,6 +171,10 @@ except Exception as e:
     st.caption(f"无法加载播放列表: {e}")
 
 if podcasts:
+    # 初始化脚本显示状态
+    if "visible_scripts" not in st.session_state:
+        st.session_state.visible_scripts = {}
+    
     for podcast in podcasts:
         podcast_id = podcast.get("id", "")
         title = podcast.get("title", "未命名")
@@ -186,12 +190,25 @@ if podcasts:
             # 加载脚本
             script_url = podcast.get("script_url")
             if script_url:
-                if st.button(f"📜 查看脚本", key=f"script_{podcast_id}"):
+                is_visible = st.session_state.visible_scripts.get(podcast_id, False)
+                
+                if is_visible:
+                    # 显示隐藏按钮
+                    if st.button("📜 隐藏脚本", key=f"hide_{podcast_id}"):
+                        st.session_state.visible_scripts[podcast_id] = False
+                        st.rerun()
+                    
+                    # 显示脚本内容
                     script_content = storage.get_script_content(script_url)
                     if script_content:
                         st.text(script_content)
                     else:
                         st.warning("无法加载脚本")
+                else:
+                    # 显示查看按钮
+                    if st.button("📜 查看脚本", key=f"show_{podcast_id}"):
+                        st.session_state.visible_scripts[podcast_id] = True
+                        st.rerun()
             
             # 来源链接
             source_urls = podcast.get("source_urls", [])

@@ -16,15 +16,25 @@ st.set_page_config(
 # 自定义 CSS 美化
 st.markdown("""
 <style>
-    /* 减少顶部空白 */
+    /* 减少顶部空白，但保留给标题的空间 */
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 2rem !important;
         padding-bottom: 1rem !important;
+    }
+    
+    /* 隐藏 Streamlit 右上角工具栏（rerun, share 等） */
+    [data-testid="stToolbar"] {
+        display: none !important;
     }
     
     /* 隐藏 Streamlit 默认的顶部装饰 */
     header[data-testid="stHeader"] {
         height: 0;
+    }
+    
+    /* 隐藏底部的 "Made with Streamlit" */
+    footer {
+        display: none !important;
     }
     
     /* 标题样式 */

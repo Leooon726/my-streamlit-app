@@ -39,13 +39,13 @@ st.markdown("""
     
     /* 标题样式 */
     .main-title {
-        font-size: 1.8rem;
-        font-weight: 700;
+        font-size: 1.2rem;
+        font-weight: 600;
         color: #1a1a2e;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.3rem;
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.3rem;
     }
     
     /* 输入框美化 */
